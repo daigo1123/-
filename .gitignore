@@ -1,0 +1,20 @@
+# Audio files (too large for git, generate locally with aac-to-youtube.sh)
+*.mp3
+*.aac
+
+# Dependencies
+node_modules/
+*.egg-info/
+__pycache__/
+.venv/
+venv/
+
+# Build artifacts
+dist/
+build/
+*.pyc
+*.o
+
+# OS files
+.DS_Store
+Thumbs.db
