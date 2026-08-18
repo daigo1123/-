@@ -30,29 +30,32 @@ const QUESTIONS = [
 const QUESTION_BY_KEY = Object.fromEntries(QUESTIONS.map((q) => [q.key, q]));
 const KEY_BY_LABEL = Object.fromEntries(QUESTIONS.map((q) => [q.label, q.key]));
 
-// UTC時 → その時間帯のセッション（JST = UTC+9）
+// JST時 → その時間帯のセッション
 const SESSIONS = {
-  0: { intro: "おはようございます☀️\n【朝】未来を頭の中に作る時間です。2問続けて聞きます。", keys: ["m1", "m2"] },
-  2: { intro: null, keys: ["d1"] },
-  3: { intro: null, keys: ["d2"] },
-  6: { intro: null, keys: ["d3"] },
-  8: { intro: null, keys: ["d4"] },
-  12: {
+  9: { intro: "おはようございます☀️\n【朝】未来を頭の中に作る時間です。2問続けて聞きます。", keys: ["m1", "m2"] },
+  11: { intro: null, keys: ["d1"] },
+  12: { intro: null, keys: ["d2"] },
+  15: { intro: null, keys: ["d3"] },
+  17: { intro: null, keys: ["d4"] },
+  21: {
     intro: "🌙 夜の振り返りの時間です。\n全11問、1問ずつ聞いていきます。最後まで答えると今日のまとめが届きます。",
     keys: ["n1", "n2", "n3", "n4", "n5y", "n5m", "n5t", "n6", "s1", "s2", "s3"],
   },
 };
 
+const SESSION_HOURS = Object.keys(SESSIONS)
+  .map(Number)
+  .sort((a, b) => a - b);
+
 // セッション完了後、次の質問が来る時刻（JST）の案内
 const NEXT_TIME = { m2: "11時", d1: "12時", d2: "15時", d3: "17時", d4: "21時" };
 
 const HELP_TEXT =
-  "いまは回答待ちの質問がありません🕐\n\n使えるコマンド：\n・「まとめ」→ 今日の記録を表示\n・「きのう」→ 昨日の記録を表示\n・「修正 朝① 新しい内容」→ 回答の書き直し\n・「いま」→ 回答待ちの質問をもう一度表示";
+  "いまは回答待ちの質問がありません🕐\n\n使えるコマンド：\n・「スタート」→ 今日ぶんの未回答をまとめて聞く\n・「まとめ」→ 今日の記録を表示\n・「きのう」→ 昨日の記録を表示\n・「修正 朝① 新しい内容」→ 回答の書き直し\n・「いま」→ 回答待ちの質問をもう一度表示";
 
 export default {
   async scheduled(controller, env, ctx) {
-    const hour = new Date(controller.scheduledTime).getUTCHours();
-    const session = SESSIONS[hour];
+    const session = SESSIONS[jstHour(controller.scheduledTime)];
     if (!session) return;
 
     const date = jstDate(controller.scheduledTime);
@@ -102,7 +105,7 @@ async function handleEvent(env, ev) {
         {
           type: "text",
           text:
-            "友だち追加ありがとうございます👋\n毎日この時間に質問を送ります：\n\n☀️ 9時：朝の2問（未来を頭の中に作る）\n🕚 11・12・15・17時：昼の問い\n🌙 21時：夜の振り返り（全11問）\n\n夜の最後まで答えると、その日のまとめが届きます。\n回答はそのままメッセージで送ってください。",
+            "友だち追加ありがとうございます👋\n毎日この時間に質問を送ります：\n\n☀️ 9時：朝の2問（未来を頭の中に作る）\n🕚 11・12・15・17時：昼の問い\n🌙 21時：夜の振り返り（全11問）\n\n夜の最後まで答えると、その日のまとめが届きます。\n回答はそのままメッセージで送ってください。\n\n答えそびれたときは「スタート」と送ると、未回答ぶんをまとめて聞きます。",
         },
       ],
     });
@@ -128,6 +131,23 @@ async function handleEvent(env, ev) {
   }
   if (text === "きのう") {
     await reply(env, ev.replyToken, await buildSummary(env, userId, jstDate(Date.now() - 24 * 3600 * 1000)));
+    return;
+  }
+
+  // コマンド：スタート（今の時刻までに出題済みで、まだ答えていない分をまとめて聞く）
+  if (text === "スタート" || text === "今日の分") {
+    const pending = await pendingKeys(env, userId, date, jstHour(Date.now()));
+    if (pending.length === 0) {
+      await reply(env, ev.replyToken, "今の時点で出題済みのぶんは、すべて回答済みです✨\n次の時刻になったらまた質問が届きます。");
+      return;
+    }
+    await setQueue(env, userId, pending);
+    await reply(
+      env,
+      ev.replyToken,
+      `未回答が${pending.length}問あります。1問ずつ聞いていきますね。\n\n` +
+        (await questionText(env, userId, pending[0], date))
+    );
     return;
   }
 
@@ -191,6 +211,20 @@ async function questionText(env, userId, key, date) {
     if (morning) text += `\n\n（今朝の回答）\n${morning}`;
   }
   return text;
+}
+
+// 指定時刻(JST)までに出題済みの質問のうち、まだ回答がないものを出題順に返す
+async function pendingKeys(env, userId, date, hour) {
+  const keys = SESSION_HOURS.filter((h) => h <= hour).flatMap((h) => SESSIONS[h].keys);
+  if (keys.length === 0) return [];
+
+  const { results } = await env.DB.prepare(
+    "SELECT question_key FROM answers WHERE user_id = ? AND date = ?"
+  )
+    .bind(userId, date)
+    .all();
+  const answered = new Set(results.map((r) => r.question_key));
+  return keys.filter((k) => !answered.has(k));
 }
 
 // ---- まとめ ----
@@ -297,4 +331,8 @@ async function verifySignature(secret, body, signature) {
 
 function jstDate(ts) {
   return new Date(ts + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+function jstHour(ts) {
+  return new Date(ts + 9 * 3600 * 1000).getUTCHours();
 }
