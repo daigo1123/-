@@ -32,9 +32,10 @@ LINE無料プラン（月200通）内に収まる設計：push は1日6通 × 31
    - **バインディング** → **D1 データベース**：変数名 `DB`、データベース `line-reset-bot`
    - **トリガーイベント（Cron トリガー）**：以下の1本を追加（UTC）
      - `0 0,2,3,6,8,12 * * *`（無料プランはCronトリガー5本までのため1本にまとめる）
-4. WorkerのURLを確認（例 `https://line-reset-bot.xxxx.workers.dev`）
+4. WorkerのURL：`https://line-reset-bot.daigonozu.workers.dev`（デプロイ済み）
 5. LINE Developersコンソール → チャネル → **Messaging API設定**：
-   - Webhook URL に `https://line-reset-bot.xxxx.workers.dev/webhook` を設定 → **検証** → 成功を確認
+   - Webhook URL に `https://line-reset-bot.daigonozu.workers.dev/webhook` を設定 → **検証** → 成功を確認
+     （httpではなく **https** で登録すること）
    - **Webhookの利用** をオン
    - LINE Official Account Manager側の **応答メッセージ** はオフ
 6. 自分のスマホでBotに何かメッセージを送る（これでユーザー登録される）
