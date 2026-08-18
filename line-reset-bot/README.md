@@ -30,8 +30,8 @@ LINE無料プラン（月200通）内に収まる設計：push は1日6通 × 31
      - `LINE_CHANNEL_ACCESS_TOKEN`（シークレット）＝ LINE Developersで発行した長期トークン
      - `LINE_CHANNEL_SECRET`（シークレット）＝ チャネルシークレット
    - **バインディング** → **D1 データベース**：変数名 `DB`、データベース `line-reset-bot`
-   - **トリガーイベント（Cron トリガー）**：以下の6本を追加（UTC）
-     - `0 0 * * *` / `0 2 * * *` / `0 3 * * *` / `0 6 * * *` / `0 8 * * *` / `0 12 * * *`
+   - **トリガーイベント（Cron トリガー）**：以下の1本を追加（UTC）
+     - `0 0,2,3,6,8,12 * * *`（無料プランはCronトリガー5本までのため1本にまとめる）
 4. WorkerのURLを確認（例 `https://line-reset-bot.xxxx.workers.dev`）
 5. LINE Developersコンソール → チャネル → **Messaging API設定**：
    - Webhook URL に `https://line-reset-bot.xxxx.workers.dev/webhook` を設定 → **検証** → 成功を確認

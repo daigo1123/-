@@ -3,8 +3,9 @@ main = "src/index.js"
 compatibility_date = "2026-08-01"
 
 # JST: 9時 / 11時 / 12時 / 15時 / 17時 / 21時（cronはUTC指定 = -9時間）
+# 無料プランはCronトリガー5本までのため、1本にまとめている
 [triggers]
-crons = ["0 0 * * *", "0 2 * * *", "0 3 * * *", "0 6 * * *", "0 8 * * *", "0 12 * * *"]
+crons = ["0 0,2,3,6,8,12 * * *"]
 
 [[d1_databases]]
 binding = "DB"
