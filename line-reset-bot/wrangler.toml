@@ -1,0 +1,12 @@
+name = "line-reset-bot"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# JST: 9時 / 11時 / 12時 / 15時 / 17時 / 21時（cronはUTC指定 = -9時間）
+[triggers]
+crons = ["0 0 * * *", "0 2 * * *", "0 3 * * *", "0 6 * * *", "0 8 * * *", "0 12 * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "line-reset-bot"
+database_id = "dca98961-a3a9-4bee-80f2-641fb3b539c2"
