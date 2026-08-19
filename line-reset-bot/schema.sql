@@ -17,8 +17,10 @@ CREATE TABLE IF NOT EXISTS answers (
 );
 
 -- いまどの質問への回答待ちか（質問キーの配列をJSONで保持）
+-- queue_date は、その回答をどの日付として保存するか（過去日の記入に対応するため）
 CREATE TABLE IF NOT EXISTS state (
   user_id TEXT PRIMARY KEY,
   queue TEXT NOT NULL DEFAULT '[]',
+  queue_date TEXT,
   updated_at TEXT NOT NULL
 );

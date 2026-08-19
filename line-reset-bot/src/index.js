@@ -51,7 +51,10 @@ const SESSION_HOURS = Object.keys(SESSIONS)
 const NEXT_TIME = { m2: "11時", d1: "12時", d2: "15時", d3: "17時", d4: "21時" };
 
 const HELP_TEXT =
-  "いまは回答待ちの質問がありません🕐\n\n使えるコマンド：\n・「スタート」→ 今日ぶんの未回答をまとめて聞く\n・「まとめ」→ 今日の記録を表示\n・「きのう」→ 昨日の記録を表示\n・「修正 朝① 新しい内容」→ 回答の書き直し\n・「いま」→ 回答待ちの質問をもう一度表示";
+  "いまは回答待ちの質問がありません🕐\n\n使えるコマンド：\n・「スタート」→ 今日ぶんの未回答をまとめて聞く\n・「スタート きのう」→ 昨日の未回答ぶんを記入（「スタート 8/17」もOK）\n・「まとめ」→ 今日の記録を表示（「まとめ 8/17」で過去日も）\n・「きのう」→ 昨日の記録を表示\n・「修正 朝① 新しい内容」→ 回答の書き直し\n・「いま」→ 回答待ちの質問をもう一度表示";
+
+const DATE_HELP =
+  "日付が読み取れませんでした📅\n「きのう」「おととい」「8/17」「2026-08-17」の形式で指定してください。";
 
 export default {
   async scheduled(controller, env, ctx) {
@@ -62,7 +65,7 @@ export default {
     const { results: users } = await env.DB.prepare("SELECT user_id FROM users").all();
 
     for (const { user_id } of users) {
-      await setQueue(env, user_id, session.keys);
+      await setQueue(env, user_id, session.keys, date);
       const messages = [];
       if (session.intro) messages.push({ type: "text", text: session.intro });
       messages.push({ type: "text", text: await questionText(env, user_id, session.keys[0], date) });
@@ -124,9 +127,15 @@ async function handleEvent(env, ev) {
   const text = ev.message.text.trim();
   const date = jstDate(Date.now());
 
-  // コマンド：まとめ
-  if (text === "まとめ") {
-    await reply(env, ev.replyToken, await buildSummary(env, userId, date));
+  // コマンド：まとめ（「まとめ 8/17」のように日付指定も可）
+  const sum = text.match(/^まとめ(?:\s+(.+))?$/);
+  if (sum) {
+    const target = sum[1] ? parseDateArg(sum[1], Date.now()) : date;
+    if (!target) {
+      await reply(env, ev.replyToken, DATE_HELP);
+      return;
+    }
+    await reply(env, ev.replyToken, await buildSummary(env, userId, target));
     return;
   }
   if (text === "きのう") {
@@ -134,44 +143,75 @@ async function handleEvent(env, ev) {
     return;
   }
 
-  // コマンド：スタート（今の時刻までに出題済みで、まだ答えていない分をまとめて聞く）
-  if (text === "スタート" || text === "今日の分") {
-    const pending = await pendingKeys(env, userId, date, jstHour(Date.now()));
-    if (pending.length === 0) {
-      await reply(env, ev.replyToken, "今の時点で出題済みのぶんは、すべて回答済みです✨\n次の時刻になったらまた質問が届きます。");
+  // コマンド：スタート（未回答ぶんをまとめて聞く。「スタート きのう」「スタート 8/17」で過去日も可）
+  const start = text.match(/^(?:スタート|今日の分)(?:\s+(.+))?$/);
+  if (start) {
+    const target = start[1] ? parseDateArg(start[1], Date.now()) : date;
+    if (!target) {
+      await reply(env, ev.replyToken, DATE_HELP);
       return;
     }
-    await setQueue(env, userId, pending);
+    if (target > date) {
+      await reply(env, ev.replyToken, "未来の日付は指定できません📅");
+      return;
+    }
+    // 過去日は1日ぶんすべてが出題済み。当日は現在時刻までを対象にする
+    const isToday = target === date;
+    const pending = await pendingKeys(env, userId, target, isToday ? jstHour(Date.now()) : 24);
+    if (pending.length === 0) {
+      await reply(
+        env,
+        ev.replyToken,
+        isToday
+          ? "今の時点で出題済みのぶんは、すべて回答済みです✨\n次の時刻になったらまた質問が届きます。"
+          : `${target} は全問回答済みです✨`
+      );
+      return;
+    }
+    await setQueue(env, userId, pending, target);
     await reply(
       env,
       ev.replyToken,
-      `未回答が${pending.length}問あります。1問ずつ聞いていきますね。\n\n` +
-        (await questionText(env, userId, pending[0], date))
+      `${isToday ? "" : `📅 ${target} のぶんを記入します。\n`}未回答が${pending.length}問あります。1問ずつ聞いていきますね。\n\n` +
+        (await questionText(env, userId, pending[0], target))
     );
     return;
   }
 
-  // コマンド：修正 朝① 新しい内容
+  // コマンド：修正 朝① 新しい内容 ／ 修正 8/17 朝① 新しい内容
   const fix = text.match(/^修正\s+(\S+)\s+([\s\S]+)$/);
   if (fix) {
-    const key = KEY_BY_LABEL[fix[1]];
+    let target = date;
+    let label = fix[1];
+    let value = fix[2];
+    // 第1引数が日付なら、そのぶんを日付として解釈して質問ラベルを読み直す
+    if (!KEY_BY_LABEL[label]) {
+      const asDate = parseDateArg(label, Date.now());
+      const rest = value.match(/^(\S+)\s+([\s\S]+)$/);
+      if (asDate && rest) {
+        target = asDate;
+        label = rest[1];
+        value = rest[2];
+      }
+    }
+    const key = KEY_BY_LABEL[label];
     if (!key) {
-      await reply(env, ev.replyToken, `「${fix[1]}」という質問が見つかりません。例：修正 朝① 新しい内容\n（朝①② / 昼①〜④ / 夜①〜④ / 夜⑤-1〜3 / 夜⑥ / 縛り①〜③）`);
+      await reply(env, ev.replyToken, `「${label}」という質問が見つかりません。\n例：修正 朝① 新しい内容\n例：修正 8/17 昼① 新しい内容\n（朝①② / 昼①〜④ / 夜①〜④ / 夜⑤-1〜3 / 夜⑥ / 縛り①〜③）`);
       return;
     }
-    await saveAnswer(env, userId, date, key, fix[2].trim());
-    await reply(env, ev.replyToken, `✏️ 【${fix[1]}】の回答を修正しました。`);
+    await saveAnswer(env, userId, target, key, value.trim());
+    await reply(env, ev.replyToken, `✏️ ${target === date ? "" : `${target} の`}【${label}】の回答を保存しました。`);
     return;
   }
 
-  const queue = await getQueue(env, userId);
+  const { keys: queue, date: queueDate } = await getQueue(env, userId, date);
 
   // コマンド：いま（回答待ちの質問を再表示）
   if (text === "いま") {
     if (queue.length === 0) {
       await reply(env, ev.replyToken, HELP_TEXT);
     } else {
-      await reply(env, ev.replyToken, await questionText(env, userId, queue[0], date));
+      await reply(env, ev.replyToken, await questionText(env, userId, queue[0], queueDate));
     }
     return;
   }
@@ -183,15 +223,16 @@ async function handleEvent(env, ev) {
   }
 
   const key = queue.shift();
-  await saveAnswer(env, userId, date, key, text);
-  await setQueue(env, userId, queue);
+  await saveAnswer(env, userId, queueDate, key, text);
+  await setQueue(env, userId, queue, queueDate);
 
   if (queue.length > 0) {
     // 同じセッションの次の質問へ
-    await reply(env, ev.replyToken, "✅ " + (await questionText(env, userId, queue[0], date)));
-  } else if (key === "s3") {
-    // 夜の最終問 → その日のまとめを返す
-    await reply(env, ev.replyToken, "✅ 今日も全問おつかれさまでした！\n\n" + (await buildSummary(env, userId, date)));
+    await reply(env, ev.replyToken, "✅ " + (await questionText(env, userId, queue[0], queueDate)));
+  } else if (key === "s3" || queueDate !== date) {
+    // 夜の最終問、または過去日の記入が終わったとき → その日のまとめを返す
+    const head = queueDate === date ? "✅ 今日も全問おつかれさまでした！" : `✅ ${queueDate} のぶん、記入おつかれさまでした！`;
+    await reply(env, ev.replyToken, head + "\n\n" + (await buildSummary(env, userId, queueDate)));
   } else {
     const next = NEXT_TIME[key];
     await reply(env, ev.replyToken, `✅ 保存しました。${next ? `次は${next}に聞きます🕐` : ""}`);
@@ -274,20 +315,24 @@ async function getAnswer(env, userId, date, key) {
   return row && row.answer;
 }
 
-async function getQueue(env, userId) {
-  const row = await env.DB.prepare("SELECT queue FROM state WHERE user_id = ?").bind(userId).first();
+async function getQueue(env, userId, fallbackDate) {
+  const row = await env.DB.prepare("SELECT queue, queue_date FROM state WHERE user_id = ?")
+    .bind(userId)
+    .first();
+  let keys = [];
   try {
-    return row ? JSON.parse(row.queue) : [];
+    if (row) keys = JSON.parse(row.queue);
   } catch {
-    return [];
+    keys = [];
   }
+  return { keys, date: (row && row.queue_date) || fallbackDate };
 }
 
-async function setQueue(env, userId, keys) {
+async function setQueue(env, userId, keys, date) {
   await env.DB.prepare(
-    "INSERT OR REPLACE INTO state (user_id, queue, updated_at) VALUES (?, ?, ?)"
+    "INSERT OR REPLACE INTO state (user_id, queue, queue_date, updated_at) VALUES (?, ?, ?, ?)"
   )
-    .bind(userId, JSON.stringify(keys), new Date().toISOString())
+    .bind(userId, JSON.stringify(keys), date, new Date().toISOString())
     .run();
 }
 
@@ -335,4 +380,27 @@ function jstDate(ts) {
 
 function jstHour(ts) {
   return new Date(ts + 9 * 3600 * 1000).getUTCHours();
+}
+
+// 「きのう」「8/17」「2026-08-17」などを YYYY-MM-DD に変換する。解釈できなければ null
+function parseDateArg(arg, now) {
+  const t = arg.trim();
+  const pad = (n) => String(n).padStart(2, "0");
+
+  if (t === "今日" || t === "きょう") return jstDate(now);
+  if (t === "昨日" || t === "きのう") return jstDate(now - 86400000);
+  if (t === "一昨日" || t === "おととい") return jstDate(now - 2 * 86400000);
+
+  let m = t.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+
+  m = t.match(/^(\d{1,2})[-/月](\d{1,2})日?$/);
+  if (m) {
+    const today = jstDate(now);
+    const candidate = `${today.slice(0, 4)}-${pad(m[1])}-${pad(m[2])}`;
+    // 未来になるなら前年のこと（年末年始をまたいだ指定）
+    return candidate > today ? `${Number(today.slice(0, 4)) - 1}-${pad(m[1])}-${pad(m[2])}` : candidate;
+  }
+
+  return null;
 }
