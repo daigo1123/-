@@ -63,6 +63,15 @@ npx wrangler deploy
 
 D1・スキーマは適用済み。作り直す場合は `npx wrangler d1 execute line-reset-bot --file schema.sql --remote`。
 
+## 回答を見返す
+
+- **LINEから**：「まとめ」「きのう」「まとめ 8/17」
+- **データベースから**：Cloudflareダッシュボード → ストレージとデータベース → D1
+  → `line-reset-bot` → 「コンソール」タブ → `queries.sql` のブロックを1つ貼って実行
+
+`queries.sql` には、日ごとの記入状況・1日ぶんの全文表示・特定の問いの推移・
+キーワード検索・記入もれ一覧を用意してある。
+
 ## テスト
 
 ```sh
